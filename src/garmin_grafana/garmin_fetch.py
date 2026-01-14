@@ -61,6 +61,7 @@ LACTATE_THRESHOLD_SPORTS = os.getenv("LACTATE_THRESHOLD_SPORTS", "RUNNING").uppe
 KEEP_FIT_FILES = True if os.getenv("KEEP_FIT_FILES") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional
 FIT_FILE_STORAGE_LOCATION = os.getenv("FIT_FILE_STORAGE_LOCATION", os.path.join(os.path.expanduser("~"), "fit_filestore"))
 ALWAYS_PROCESS_FIT_FILES = True if os.getenv("ALWAYS_PROCESS_FIT_FILES") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional, will process all FIT files for all activities including indoor ones lacking GPS data
+INCLUDE_RUNNING_DYNAMICS = False if os.getenv("INCLUDE_RUNNING_DYNAMICS") in ['False','false','FALSE','f','F','no','No','NO','0'] else True # optional, includes running dynamics fields (stride length, vertical oscillation, ground contact time, etc.) from FIT files when enabled (default: True)
 REQUEST_INTRADAY_DATA_REFRESH = True if os.getenv("REQUEST_INTRADAY_DATA_REFRESH") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional, This requests data refresh for the intraday data (older than 6 months) - see issue #77. Pauses the script for 24 hours when the daily limit is reached.
 IGNORE_INTRADAY_DATA_REFRESH_DAYS = int(os.getenv("IGNORE_INTRADAY_DATA_REFRESH_DAYS", 30)) # optional, ignores the REQUEST_INTRADAY_DATA_REFRESH for the specified number of days from current date. 
 TAG_MEASUREMENTS_WITH_USER_EMAIL = True if os.getenv("TAG_MEASUREMENTS_WITH_USER_EMAIL") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # Adds an additional "User_ID" tag in each measurement for multi user database support - see #96
@@ -744,9 +745,24 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Fractional_Cadence": parsed_record.get('fractional_cadence', None),
                                     "Temperature": parsed_record.get('temperature', None),
                                     "Accumulated_Power": parsed_record.get('accumulated_power', None),
-                                    "Power": parsed_record.get('power', None)
+                                    "Power": parsed_record.get('power', None),
                                 }
                             }
+                            # Conditionally add running dynamics fields if INCLUDE_RUNNING_DYNAMICS is enabled
+                            if INCLUDE_RUNNING_DYNAMICS:
+                                point["fields"].update({
+                                    # Running Dynamics metrics (requires compatible sensor: HRM-Run, HRM-Pro, Running Dynamics Pod)
+                                    "StrideLength": parsed_record.get('step_length', None),  # Stride length in millimeters
+                                    "VerticalOscillation": parsed_record.get('vertical_oscillation', None),  # Vertical oscillation in millimeters
+                                    "VerticalRatio": parsed_record.get('vertical_ratio', None),  # Vertical ratio as percentage
+                                    "GroundContactTime": parsed_record.get('stance_time', None),  # Ground contact time in milliseconds
+                                    "GroundContactTimeBalance": parsed_record.get('stance_time_balance', None),  # Left/Right balance percentage
+                                    "StanceTimePercent": parsed_record.get('stance_time_percent', None),  # Stance time as percentage of step
+                                    # Performance/Stamina metrics
+                                    "PerformanceCondition": parsed_record.get('performance_condition', None),  # Real-time performance indicator
+                                    "Stamina": parsed_record.get('current_stress', None),  # Current stamina/stress level
+                                    "StaminaPotential": parsed_record.get('stamina_potential', None),  # Potential stamina remaining
+                                })
                             points_list.append(point)
                     for session_record in all_sessions_list:
                         if session_record.get('start_time') or session_record.get('timestamp'):
@@ -772,9 +788,27 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Aerobic_Training": session_record.get('total_training_effect', None),
                                     "Anaerobic_Training": session_record.get('total_anaerobic_training_effect', None),
                                     "Primary_Benefit": session_record.get('primary_benefit', None),
-                                    "Recovery_Time": session_record.get('recovery_time', None)
+                                    "Recovery_Time": session_record.get('recovery_time', None),
                                 }
                             }
+                            # Conditionally add running dynamics and power metrics if INCLUDE_RUNNING_DYNAMICS is enabled
+                            if INCLUDE_RUNNING_DYNAMICS:
+                                point["fields"].update({
+                                    # Running Dynamics session averages (requires compatible sensor)
+                                    "Avg_StrideLength": session_record.get('avg_step_length', None),  # Average stride length in mm
+                                    "Avg_VerticalOscillation": session_record.get('avg_vertical_oscillation', None),  # Average vertical oscillation in mm
+                                    "Avg_VerticalRatio": session_record.get('avg_vertical_ratio', None),  # Average vertical ratio %
+                                    "Avg_GroundContactTime": session_record.get('avg_stance_time', None),  # Average ground contact time in ms
+                                    "Avg_GroundContactTimeBalance": session_record.get('avg_stance_time_balance', None),  # Avg L/R balance %
+                                    # Power metrics
+                                    "Total_Power": session_record.get('total_work', None),  # Total work in joules
+                                    "Avg_Power": session_record.get('avg_power', None),  # Average power in watts
+                                    "Max_Power": session_record.get('max_power', None),  # Max power in watts
+                                    "Normalized_Power": session_record.get('normalized_power', None),  # Normalized power
+                                    "Threshold_Power": session_record.get('threshold_power', None),  # FTP/threshold power
+                                    "Training_Stress_Score": session_record.get('training_stress_score', None),  # TSS
+                                    "Intensity_Factor": session_record.get('intensity_factor', None),  # IF
+                                })
                             points_list.append(point)
                     for length_record in all_lengths_list:
                         if length_record.get('start_time') or length_record.get('timestamp'):
@@ -828,12 +862,23 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Max_Speed": lap_record.get('enhanced_max_speed', None),
                                     "Calories": lap_record.get('total_calories', None),
                                     "Avg_Power": lap_record.get('avg_power', None),
+                                    "Max_Power": lap_record.get('max_power', None),
                                     "Avg_HR": lap_record.get('avg_heart_rate', None),
                                     "Max_HR": lap_record.get('max_heart_rate', None),
                                     "Avg_Cadence": lap_record.get('avg_cadence', None),
-                                    "Avg_Temperature": lap_record.get('avg_temperature', None)
+                                    "Avg_Temperature": lap_record.get('avg_temperature', None),
                                 }
                             }
+                            # Conditionally add running dynamics metrics if INCLUDE_RUNNING_DYNAMICS is enabled
+                            if INCLUDE_RUNNING_DYNAMICS:
+                                point["fields"].update({
+                                    # Running Dynamics lap-level averages (requires compatible sensor)
+                                    "Avg_StrideLength": lap_record.get('avg_step_length', None),  # Average stride length in mm
+                                    "Avg_VerticalOscillation": lap_record.get('avg_vertical_oscillation', None),  # Average vertical oscillation in mm
+                                    "Avg_VerticalRatio": lap_record.get('avg_vertical_ratio', None),  # Average vertical ratio %
+                                    "Avg_GroundContactTime": lap_record.get('avg_stance_time', None),  # Average ground contact time in ms
+                                    "Avg_GroundContactTimeBalance": lap_record.get('avg_stance_time_balance', None),  # Avg L/R balance %
+                                })
                             points_list.append(point)
                     if KEEP_FIT_FILES:
                         os.makedirs(FIT_FILE_STORAGE_LOCATION, exist_ok=True)
