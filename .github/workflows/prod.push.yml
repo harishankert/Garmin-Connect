@@ -16,12 +16,12 @@ on:
 env:
   IMAGE_NAME: garmin-fetch-data
   IMAGE_TAG: latest
-  IMAGE_REPO: thisisarpanghosh
+  IMAGE_REPO: harishankert
 
 jobs:
   build_and_push:
     name: Build Multi-Arch Docker Image and Push to Docker Hub & GHCR
-    if: ${{ github.repository == 'arpanghosh8453/garmin-grafana' }}
+    if: ${{ github.repository == 'harishankert/Garmin-Connect' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
