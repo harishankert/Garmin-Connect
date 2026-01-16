@@ -52,8 +52,8 @@ fi
 #     sed -i 's|/home/appuser/.garminconnect|/root/.garminconnect|g' ./compose.yml
 # fi
 
-echo "🐳 Pulling the latest thisisarpanghosh/garmin-fetch-data Docker image..."
-docker pull thisisarpanghosh/garmin-fetch-data:latest || { echo "Docker pull failed. Do you have docker installed and can run docker commands?"; exit 1; }
+echo "🐳 Pulling the latest ghcr.io/harishankert/garmin-grafana:latest Docker image..."
+docker pull ghcr.io/harishankert/garmin-grafana:latest || { echo "Docker pull failed. Do you have docker installed and can run docker commands?"; exit 1; }
 
 echo "🐳Terminating any previous running containers from this stack"
 docker compose down
