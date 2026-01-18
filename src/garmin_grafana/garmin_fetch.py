@@ -762,6 +762,8 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "PerformanceCondition": parsed_record.get('performance_condition', None),  # Real-time performance indicator
                                     "Stamina": parsed_record.get('current_stress', None),  # Current stamina/stress level
                                     "StaminaPotential": parsed_record.get('stamina_potential', None),  # Potential stamina remaining
+                                    # Respiration metrics
+                                    "RespirationRate": parsed_record.get('respiration_rate', None),  # Breaths per minute
                                 })
                             points_list.append(point)
                     for session_record in all_sessions_list:
@@ -808,6 +810,9 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Threshold_Power": session_record.get('threshold_power', None),  # FTP/threshold power
                                     "Training_Stress_Score": session_record.get('training_stress_score', None),  # TSS
                                     "Intensity_Factor": session_record.get('intensity_factor', None),  # IF
+                                    # Respiration metrics
+                                    "Avg_RespirationRate": session_record.get('avg_respiration_rate', None),  # Average breaths/min
+                                    "Max_RespirationRate": session_record.get('max_respiration_rate', None),  # Max breaths/min
                                 })
                             points_list.append(point)
                     for length_record in all_lengths_list:
@@ -878,6 +883,9 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Avg_VerticalRatio": lap_record.get('avg_vertical_ratio', None),  # Average vertical ratio %
                                     "Avg_GroundContactTime": lap_record.get('avg_stance_time', None),  # Average ground contact time in ms
                                     "Avg_GroundContactTimeBalance": lap_record.get('avg_stance_time_balance', None),  # Avg L/R balance %
+                                    # Respiration metrics
+                                    "Avg_RespirationRate": lap_record.get('avg_respiration_rate', None),  # Average breaths/min
+                                    "Max_RespirationRate": lap_record.get('max_respiration_rate', None),  # Max breaths/min
                                 })
                             points_list.append(point)
                     if KEEP_FIT_FILES:
