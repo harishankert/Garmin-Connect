@@ -787,14 +787,14 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "ActivityName": activity_type,
                                     "Activity_ID": activityID,
                                     "Sport": str(session_record.get('sport', None)), # Avoid partial write error 400 see #152#issuecomment-3084539416
-                                    "Sub_Sport": session_record.get('sub_sport', None),
+                                    "Sub_Sport": str(session_record.get('sub_sport', None)),
                                     "Pool_Length": session_record.get('pool_length', None),
-                                    "Pool_Length_Unit": session_record.get('pool_length_unit', None),
+                                    "Pool_Length_Unit": str(session_record.get('pool_length_unit', None)),
                                     "Lengths": session_record.get('num_laps', None),
                                     "Laps": session_record.get('num_lengths', None),
                                     "Aerobic_Training": session_record.get('total_training_effect', None),
                                     "Anaerobic_Training": session_record.get('total_anaerobic_training_effect', None),
-                                    "Primary_Benefit": session_record.get('primary_benefit', None),
+                                    "Primary_Benefit": str(session_record.get('primary_benefit', None)),
                                     "Recovery_Time": session_record.get('recovery_time', None),
                                 }
                             }
