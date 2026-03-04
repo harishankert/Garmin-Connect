@@ -1,4 +1,5 @@
 # %%
+import traceback
 import base64, requests, time, pytz, logging, os, sys, dotenv, io, zipfile
 from fitparse import FitFile, FitParseError
 from datetime import datetime, timedelta
@@ -56,18 +57,18 @@ MAX_CONSECUTIVE_500_ERRORS = int(os.getenv("MAX_CONSECUTIVE_500_ERRORS", 10)) # 
 INFLUXDB_ENDPOINT_IS_HTTP = False if os.getenv("INFLUXDB_ENDPOINT_IS_HTTP") in ['False','false','FALSE','f','F','no','No','NO','0'] else True # optional
 GARMIN_DEVICENAME_AUTOMATIC = False if GARMIN_DEVICENAME != "Unknown" else True # optional
 UPDATE_INTERVAL_SECONDS = int(os.getenv("UPDATE_INTERVAL_SECONDS", 300)) # optional
-FETCH_SELECTION = os.getenv("FETCH_SELECTION", "daily_avg,sleep,steps,heartrate,stress,breathing,hrv,fitness_age,vo2,activity,race_prediction,body_composition") # additional available values are lactate_threshold,training_status,training_readiness,hill_score,endurance_score,blood_pressure,hydration,solar_intensity which you can add to the list seperated by , without any space
+FETCH_SELECTION = os.getenv("FETCH_SELECTION", "daily_avg,sleep,steps,heartrate,stress,breathing,hrv,fitness_age,vo2,activity,race_prediction,body_composition,lifestyle") # additional available values are lactate_threshold,training_status,training_readiness,hill_score,endurance_score,blood_pressure,hydration,solar_intensity which you can add to the list seperated by , without any space
 LACTATE_THRESHOLD_SPORTS = os.getenv("LACTATE_THRESHOLD_SPORTS", "RUNNING").upper().split(",") # Garmin currently implements RUNNING, but has provisions for CYCLING, and SWIMMING
 KEEP_FIT_FILES = True if os.getenv("KEEP_FIT_FILES") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional
 FIT_FILE_STORAGE_LOCATION = os.getenv("FIT_FILE_STORAGE_LOCATION", os.path.join(os.path.expanduser("~"), "fit_filestore"))
 ALWAYS_PROCESS_FIT_FILES = True if os.getenv("ALWAYS_PROCESS_FIT_FILES") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional, will process all FIT files for all activities including indoor ones lacking GPS data
-INCLUDE_RUNNING_DYNAMICS = False if os.getenv("INCLUDE_RUNNING_DYNAMICS") in ['False','false','FALSE','f','F','no','No','NO','0'] else True # optional, includes running dynamics fields (stride length, vertical oscillation, ground contact time, etc.) from FIT files when enabled (default: True)
 REQUEST_INTRADAY_DATA_REFRESH = True if os.getenv("REQUEST_INTRADAY_DATA_REFRESH") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional, This requests data refresh for the intraday data (older than 6 months) - see issue #77. Pauses the script for 24 hours when the daily limit is reached.
 IGNORE_INTRADAY_DATA_REFRESH_DAYS = int(os.getenv("IGNORE_INTRADAY_DATA_REFRESH_DAYS", 30)) # optional, ignores the REQUEST_INTRADAY_DATA_REFRESH for the specified number of days from current date. 
 TAG_MEASUREMENTS_WITH_USER_EMAIL = True if os.getenv("TAG_MEASUREMENTS_WITH_USER_EMAIL") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # Adds an additional "User_ID" tag in each measurement for multi user database support - see #96
 FORCE_REPROCESS_ACTIVITIES = False if os.getenv("FORCE_REPROCESS_ACTIVITIES") in ['False','false','FALSE','f','F','no','No','NO','0'] else True # optional, will enable re-processing of fit files when set to true, may skip activities if set to false (issue #30)
 USER_TIMEZONE = os.getenv("USER_TIMEZONE", "") # optional, fetches timezone info from last activity automatically if left blank
 PARSED_ACTIVITY_ID_LIST = []
+IGNORE_ERRORS = True if os.getenv("IGNORE_ERRORS") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False
 
 # %%
 for handler in logging.root.handlers[:]:
@@ -222,7 +223,10 @@ def get_daily_stats(date_str):
                 "restingHeartRate": stats_json.get("restingHeartRate"),
                 "minAvgHeartRate": stats_json.get("minAvgHeartRate"),
                 "maxAvgHeartRate": stats_json.get("maxAvgHeartRate"),
-                
+
+                "avgSkinTempDeviationC": stats_json.get("avgSkinTempDeviationC"),
+                "avgSkinTempDeviationF": stats_json.get("avgSkinTempDeviationF"),
+
                 "stressDuration": stats_json.get("stressDuration"),
                 "restStressDuration": stats_json.get("restStressDuration"),
                 "activityStressDuration": stats_json.get("activityStressDuration"),
@@ -317,7 +321,9 @@ def get_sleep_data(date_str):
             "restlessMomentsCount": all_sleep_data.get("restlessMomentsCount"),
             "avgOvernightHrv": all_sleep_data.get("avgOvernightHrv"),
             "bodyBatteryChange": all_sleep_data.get("bodyBatteryChange"),
-            "restingHeartRate": all_sleep_data.get("restingHeartRate")
+            "restingHeartRate": all_sleep_data.get("restingHeartRate"),
+            "avgSkinTempDeviationC": all_sleep_data.get("avgSkinTempDeviationC"),
+            "avgSkinTempDeviationF": all_sleep_data.get("avgSkinTempDeviationF")
             }
         })
     sleep_movement_intraday = all_sleep_data.get("sleepMovement")
@@ -647,6 +653,7 @@ def get_activity_summary(date_str):
                     "Activity_ID": activity.get('activityId'),
                     'Device_ID': activity.get('deviceId'),
                     'activityName': activity.get('activityName'),
+                    'description': activity.get('description'),
                     'activityType': (activity.get('activityType') or {}).get('typeKey',None),
                     'distance': activity.get('distance'),
                     'elapsedDuration': activity.get('elapsedDuration'),
@@ -659,11 +666,11 @@ def get_activity_summary(date_str):
                     'maxHR': activity.get('maxHR'),
                     'locationName': activity.get('locationName'),
                     'lapCount': activity.get('lapCount'),
-                    'hrTimeInZone_1': activity.get('hrTimeInZone_1'),
-                    'hrTimeInZone_2': activity.get('hrTimeInZone_2'),
-                    'hrTimeInZone_3': activity.get('hrTimeInZone_3'),
-                    'hrTimeInZone_4': activity.get('hrTimeInZone_4'),
-                    'hrTimeInZone_5': activity.get('hrTimeInZone_5'),
+                    'hrTimeInZone_1': float(val) if (val := activity.get('hrTimeInZone_1')) is not None else None,
+                    'hrTimeInZone_2': float(val) if (val := activity.get('hrTimeInZone_2')) is not None else None,
+                    'hrTimeInZone_3': float(val) if (val := activity.get('hrTimeInZone_3')) is not None else None,
+                    'hrTimeInZone_4': float(val) if (val := activity.get('hrTimeInZone_4')) is not None else None,
+                    'hrTimeInZone_5': float(val) if (val := activity.get('hrTimeInZone_5')) is not None else None,
                 }
             })
             points_list.append({
@@ -746,16 +753,11 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Temperature": parsed_record.get('temperature', None),
                                     "Accumulated_Power": parsed_record.get('accumulated_power', None),
                                     "Power": parsed_record.get('power', None),
-                                }
-                            }
-                            # Conditionally add running dynamics fields if INCLUDE_RUNNING_DYNAMICS is enabled
-                            if INCLUDE_RUNNING_DYNAMICS:
-                                point["fields"].update({
-                                    # Running Dynamics metrics (requires compatible sensor: HRM-Run, HRM-Pro, Running Dynamics Pod)
-                                    "StrideLength": parsed_record.get('step_length', None),  # Stride length in millimeters
-                                    "VerticalOscillation": parsed_record.get('vertical_oscillation', None),  # Vertical oscillation in millimeters
-                                    "VerticalRatio": parsed_record.get('vertical_ratio', None),  # Vertical ratio as percentage
-                                    "GroundContactTime": parsed_record.get('stance_time', None),  # Ground contact time in milliseconds
+                                    "Vertical_Oscillation": parsed_record.get('vertical_oscillation', None),
+                                    "Stance_Time": parsed_record.get('stance_time', None),
+                                    "Vertical_Ratio": parsed_record.get('vertical_ratio', None),
+                                    "Step_Length": parsed_record.get('step_length', None),
+                                    # Running Dynamics extras
                                     "GroundContactTimeBalance": parsed_record.get('stance_time_balance', None),  # Left/Right balance percentage
                                     "StanceTimePercent": parsed_record.get('stance_time_percent', None),  # Stance time as percentage of step
                                     # Performance/Stamina metrics
@@ -764,7 +766,8 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "StaminaPotential": parsed_record.get('stamina_potential', None),  # Potential stamina remaining
                                     # Respiration metrics
                                     "RespirationRate": parsed_record.get('respiration_rate', None),  # Breaths per minute
-                                })
+                                }
+                            }
                             points_list.append(point)
                     for session_record in all_sessions_list:
                         if session_record.get('start_time') or session_record.get('timestamp'):
@@ -793,26 +796,24 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Recovery_Time": session_record.get('recovery_time', None),
                                 }
                             }
-                            # Conditionally add running dynamics and power metrics if INCLUDE_RUNNING_DYNAMICS is enabled
-                            if INCLUDE_RUNNING_DYNAMICS:
-                                point["fields"].update({
-                                    # Running Dynamics session averages (requires compatible sensor)
-                                    "Avg_StrideLength": session_record.get('avg_step_length', None),  # Average stride length in mm
-                                    "Avg_VerticalOscillation": session_record.get('avg_vertical_oscillation', None),  # Average vertical oscillation in mm
-                                    "Avg_VerticalRatio": session_record.get('avg_vertical_ratio', None),  # Average vertical ratio %
-                                    "Avg_GroundContactTime": session_record.get('avg_stance_time', None),  # Average ground contact time in ms
-                                    "Avg_GroundContactTimeBalance": session_record.get('avg_stance_time_balance', None),  # Avg L/R balance %
+                            point["fields"].update({
+                                    # Running Dynamics session averages
+                                    "Avg_StrideLength": session_record.get('avg_step_length', None),
+                                    "Avg_VerticalOscillation": session_record.get('avg_vertical_oscillation', None),
+                                    "Avg_VerticalRatio": session_record.get('avg_vertical_ratio', None),
+                                    "Avg_GroundContactTime": session_record.get('avg_stance_time', None),
+                                    "Avg_GroundContactTimeBalance": session_record.get('avg_stance_time_balance', None),
                                     # Power metrics
-                                    "Total_Power": session_record.get('total_work', None),  # Total work in joules
-                                    "Avg_Power": session_record.get('avg_power', None),  # Average power in watts
-                                    "Max_Power": session_record.get('max_power', None),  # Max power in watts
-                                    "Normalized_Power": session_record.get('normalized_power', None),  # Normalized power
-                                    "Threshold_Power": session_record.get('threshold_power', None),  # FTP/threshold power
-                                    "Training_Stress_Score": session_record.get('training_stress_score', None),  # TSS
-                                    "Intensity_Factor": session_record.get('intensity_factor', None),  # IF
+                                    "Total_Power": session_record.get('total_work', None),
+                                    "Avg_Power": session_record.get('avg_power', None),
+                                    "Max_Power": session_record.get('max_power', None),
+                                    "Normalized_Power": session_record.get('normalized_power', None),
+                                    "Threshold_Power": session_record.get('threshold_power', None),
+                                    "Training_Stress_Score": session_record.get('training_stress_score', None),
+                                    "Intensity_Factor": session_record.get('intensity_factor', None),
                                     # Respiration metrics
-                                    "Avg_RespirationRate": session_record.get('avg_respiration_rate', None),  # Average breaths/min
-                                    "Max_RespirationRate": session_record.get('max_respiration_rate', None),  # Max breaths/min
+                                    "Avg_RespirationRate": session_record.get('avg_respiration_rate', None),
+                                    "Max_RespirationRate": session_record.get('max_respiration_rate', None),
                                 })
                             points_list.append(point)
                     for length_record in all_lengths_list:
@@ -872,20 +873,18 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Max_HR": lap_record.get('max_heart_rate', None),
                                     "Avg_Cadence": lap_record.get('avg_cadence', None),
                                     "Avg_Temperature": lap_record.get('avg_temperature', None),
+                                    "Avg_Vertical_Oscillation": lap_record.get('avg_vertical_oscillation', None),
+                                    "Avg_Stance_Time": lap_record.get('avg_stance_time', None),
+                                    "Avg_Vertical_Ratio": lap_record.get('avg_vertical_ratio', None),
+                                    "Avg_Step_Length": lap_record.get('avg_step_length', None)
                                 }
                             }
-                            # Conditionally add running dynamics metrics if INCLUDE_RUNNING_DYNAMICS is enabled
-                            if INCLUDE_RUNNING_DYNAMICS:
-                                point["fields"].update({
-                                    # Running Dynamics lap-level averages (requires compatible sensor)
-                                    "Avg_StrideLength": lap_record.get('avg_step_length', None),  # Average stride length in mm
-                                    "Avg_VerticalOscillation": lap_record.get('avg_vertical_oscillation', None),  # Average vertical oscillation in mm
-                                    "Avg_VerticalRatio": lap_record.get('avg_vertical_ratio', None),  # Average vertical ratio %
-                                    "Avg_GroundContactTime": lap_record.get('avg_stance_time', None),  # Average ground contact time in ms
-                                    "Avg_GroundContactTimeBalance": lap_record.get('avg_stance_time_balance', None),  # Avg L/R balance %
+                            point["fields"].update({
+                                    # Running Dynamics lap extras
+                                    "Avg_GroundContactTimeBalance": lap_record.get('avg_stance_time_balance', None),
                                     # Respiration metrics
-                                    "Avg_RespirationRate": lap_record.get('avg_respiration_rate', None),  # Average breaths/min
-                                    "Max_RespirationRate": lap_record.get('max_respiration_rate', None),  # Max breaths/min
+                                    "Avg_RespirationRate": lap_record.get('avg_respiration_rate', None),
+                                    "Max_RespirationRate": lap_record.get('max_respiration_rate', None),
                                 })
                             points_list.append(point)
                     if KEEP_FIT_FILES:
@@ -1257,6 +1256,59 @@ def get_solar_intensity(date_str):
         logging.warning(f"No Solar Intensity data available for date {date_str}")
     return points_list
 
+# %%
+def get_lifestyle_data(date_str):
+    points_list = []
+    try:
+        logging.info(f"Fetching Lifestyle Journaling data for date {date_str}")
+        journal_data = garmin_obj.get_lifestyle_logging_data(date_str)
+        
+        daily_logs = journal_data.get('dailyLogsReport', [])
+        
+        for log in daily_logs:
+            behavior_name = log.get('name') or log.get('behavior')
+            if not behavior_name:
+                continue
+
+            category = log.get('category', 'UNKNOWN')
+            log_status = log.get('logStatus')
+            details = log.get('details', [])
+            
+            # status: 1 for YES, 0 for NO
+            status = 1 if log_status == "YES" else 0
+            
+            # value: sum of detail amounts if available, else 0.0
+            value = 0.0
+            if details:
+                for detail in details:
+                    amount = detail.get('amount')
+                    if amount is not None:
+                        value += float(amount)
+
+            fields = {
+                "status": status,
+                "value": value
+            }
+
+            points_list.append({
+                "measurement": "LifestyleJournal",
+                "time": pytz.timezone("UTC").localize(datetime.strptime(date_str, "%Y-%m-%d")).isoformat(),
+                "tags": {
+                    "Device": GARMIN_DEVICENAME,
+                    "Database_Name": INFLUXDB_DATABASE,
+                    "behavior": behavior_name,
+                    "category": category
+                },
+                "fields": fields
+            })
+            
+        logging.info(f"Success : Fetching Lifestyle Journaling data for date {date_str}")
+
+    except Exception as e:
+        logging.warning(f"Failed to fetch Lifestyle Journaling data for date {date_str}: {e}")
+    
+    return points_list
+
 
 # %%
 def daily_fetch_write(date_str):
@@ -1323,6 +1375,8 @@ def daily_fetch_write(date_str):
         write_points_to_influxdb(fetch_activity_GPS(activity_with_gps_id_dict))
     if 'solar_intensity' in FETCH_SELECTION:
         write_points_to_influxdb(get_solar_intensity(date_str))
+    if 'lifestyle' in FETCH_SELECTION:
+        write_points_to_influxdb(get_lifestyle_data(date_str))
 
 
 # %%
@@ -1342,8 +1396,9 @@ def fetch_write_bulk(start_date_str, end_date_str):
                     logging.info(f"Successfully fetched data after {consecutive_500_errors} consecutive 500 errors - resetting error counter")
                     consecutive_500_errors = 0
                 logging.info(f"Success : Fetched all available health metrics for date {current_date} (skipped any if unavailable)")
-                logging.info(f"Waiting : for {RATE_LIMIT_CALLS_SECONDS} seconds")
-                time.sleep(RATE_LIMIT_CALLS_SECONDS)
+                if RATE_LIMIT_CALLS_SECONDS > 0:
+                    logging.info(f"Waiting : for {RATE_LIMIT_CALLS_SECONDS} seconds")
+                    time.sleep(RATE_LIMIT_CALLS_SECONDS)
                 repeat_loop = False
             except GarminConnectTooManyRequestsError as err:
                 logging.error(err)
@@ -1401,48 +1456,54 @@ def fetch_write_bulk(start_date_str, end_date_str):
                 garmin_obj = garmin_login()
                 time.sleep(5)
                 repeat_loop = True
+            except Exception as err:
+                if IGNORE_ERRORS:
+                    logging.warning("IGNORE_ERRORS Enabled >> Failed to process %s:", current_date)
+                    logging.exception(err)
+                    repeat_loop = False
+                else:
+                    raise err
 
 
-# %%
-garmin_obj = garmin_login()
+if __name__ == "__main__":
+    garmin_obj = garmin_login()
 
-# %%
-if MANUAL_START_DATE:
-    fetch_write_bulk(MANUAL_START_DATE, MANUAL_END_DATE)
-    logging.info(f"Bulk update success : Fetched all available health metrics for date range {MANUAL_START_DATE} to {MANUAL_END_DATE}")
-    exit(0)
-else:
-    try:
-        if INFLUXDB_VERSION == "1":
-            last_influxdb_sync_time_UTC = pytz.utc.localize(datetime.strptime(list(influxdbclient.query(f"SELECT * FROM HeartRateIntraday ORDER BY time DESC LIMIT 1").get_points())[0]['time'],"%Y-%m-%dT%H:%M:%SZ"))
-        else:
-            last_influxdb_sync_time_UTC = pytz.utc.localize(influxdbclient.query(query="SELECT * FROM HeartRateIntraday ORDER BY time DESC LIMIT 1", language="influxql").to_pylist()[0]['time'])
-    except Exception as err:
-        logging.error(err)
-        logging.warning("No previously synced data found in local InfluxDB database, defaulting to 7 day initial fetching. Use specific start date ENV variable to bulk update past data")
-        last_influxdb_sync_time_UTC = (datetime.today() - timedelta(days=7)).astimezone(pytz.timezone("UTC"))
-    try:
-        if USER_TIMEZONE: # If provided by user, using that. 
-            local_timediff = datetime.now(tz=pytz.timezone(USER_TIMEZONE)).utcoffset()
-        else: # otherwise try to set automatically
-            last_activity_dict = garmin_obj.get_last_activity() # (very unlineky event that this will be empty given Garmin's userbase, everyone should have at least one activity)
-            local_timediff = datetime.strptime(last_activity_dict['startTimeLocal'], '%Y-%m-%d %H:%M:%S') - datetime.strptime(last_activity_dict['startTimeGMT'], '%Y-%m-%d %H:%M:%S')
-        if local_timediff >= timedelta(0):
-            logging.info("Using user's local timezone as UTC+" + str(local_timediff))
-        else:
-            logging.info("Using user's local timezone as UTC-" + str(-local_timediff))
-    except (KeyError, TypeError) as err:
-        logging.warning(f"Unable to determine user's timezone - Defaulting to UTC. Consider providing TZ identifier with USER_TIMEZONE environment variable")
-        local_timediff = timedelta(hours=0)
-    
-    while True:
-        last_watch_sync_time_UTC = datetime.fromtimestamp(int(garmin_obj.get_device_last_used().get('lastUsedDeviceUploadTime')/1000)).astimezone(pytz.timezone("UTC"))
-        if last_influxdb_sync_time_UTC < last_watch_sync_time_UTC:
-            logging.info(f"Update found : Current watch sync time is {last_watch_sync_time_UTC} UTC")
-            fetch_write_bulk((last_influxdb_sync_time_UTC + local_timediff).strftime('%Y-%m-%d'), (last_watch_sync_time_UTC + local_timediff).strftime('%Y-%m-%d')) # Using local dates for deciding which dates to fetch in current iteration (see issue #25)
-            last_influxdb_sync_time_UTC = last_watch_sync_time_UTC
-        else:
-            logging.info(f"No new data found : Current watch and influxdb sync time is {last_watch_sync_time_UTC} UTC")
-        logging.info(f"waiting for {UPDATE_INTERVAL_SECONDS} seconds before next automatic update calls")
-        time.sleep(UPDATE_INTERVAL_SECONDS)
-
+    # %%
+    if MANUAL_START_DATE:
+        fetch_write_bulk(MANUAL_START_DATE, MANUAL_END_DATE)
+        logging.info(f"Bulk update success : Fetched all available health metrics for date range {MANUAL_START_DATE} to {MANUAL_END_DATE}")
+        exit(0)
+    else:
+        try:
+            if INFLUXDB_VERSION == "1":
+                last_influxdb_sync_time_UTC = pytz.utc.localize(datetime.strptime(list(influxdbclient.query(f"SELECT * FROM HeartRateIntraday ORDER BY time DESC LIMIT 1").get_points())[0]['time'],"%Y-%m-%dT%H:%M:%SZ"))
+            else:
+                last_influxdb_sync_time_UTC = pytz.utc.localize(influxdbclient.query(query="SELECT * FROM HeartRateIntraday ORDER BY time DESC LIMIT 1", language="influxql").to_pylist()[0]['time'])
+        except Exception as err:
+            logging.error(err)
+            logging.warning("No previously synced data found in local InfluxDB database, defaulting to 7 day initial fetching. Use specific start date ENV variable to bulk update past data")
+            last_influxdb_sync_time_UTC = (datetime.today() - timedelta(days=7)).astimezone(pytz.timezone("UTC"))
+        try:
+            if USER_TIMEZONE: # If provided by user, using that. 
+                local_timediff = datetime.now(tz=pytz.timezone(USER_TIMEZONE)).utcoffset()
+            else: # otherwise try to set automatically
+                last_activity_dict = garmin_obj.get_last_activity() # (very unlineky event that this will be empty given Garmin's userbase, everyone should have at least one activity)
+                local_timediff = datetime.strptime(last_activity_dict['startTimeLocal'], '%Y-%m-%d %H:%M:%S') - datetime.strptime(last_activity_dict['startTimeGMT'], '%Y-%m-%d %H:%M:%S')
+            if local_timediff >= timedelta(0):
+                logging.info("Using user's local timezone as UTC+" + str(local_timediff))
+            else:
+                logging.info("Using user's local timezone as UTC-" + str(-local_timediff))
+        except (KeyError, TypeError) as err:
+            logging.warning(f"Unable to determine user's timezone - Defaulting to UTC. Consider providing TZ identifier with USER_TIMEZONE environment variable")
+            local_timediff = timedelta(hours=0)
+        
+        while True:
+            last_watch_sync_time_UTC = datetime.fromtimestamp(int(garmin_obj.get_device_last_used().get('lastUsedDeviceUploadTime')/1000)).astimezone(pytz.timezone("UTC"))
+            if last_influxdb_sync_time_UTC < last_watch_sync_time_UTC:
+                logging.info(f"Update found : Current watch sync time is {last_watch_sync_time_UTC} UTC")
+                fetch_write_bulk((last_influxdb_sync_time_UTC + local_timediff).strftime('%Y-%m-%d'), (last_watch_sync_time_UTC + local_timediff).strftime('%Y-%m-%d')) # Using local dates for deciding which dates to fetch in current iteration (see issue #25)
+                last_influxdb_sync_time_UTC = last_watch_sync_time_UTC
+            else:
+                logging.info(f"No new data found : Current watch and influxdb sync time is {last_watch_sync_time_UTC} UTC")
+            logging.info(f"waiting for {UPDATE_INTERVAL_SECONDS} seconds before next automatic update calls")
+            time.sleep(UPDATE_INTERVAL_SECONDS)
