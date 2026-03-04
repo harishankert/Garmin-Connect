@@ -671,6 +671,8 @@ def get_activity_summary(date_str):
                     'hrTimeInZone_3': float(val) if (val := activity.get('hrTimeInZone_3')) is not None else None,
                     'hrTimeInZone_4': float(val) if (val := activity.get('hrTimeInZone_4')) is not None else None,
                     'hrTimeInZone_5': float(val) if (val := activity.get('hrTimeInZone_5')) is not None else None,
+                    'Aerobic_Training': float(val) if (val := activity.get('aerobicTrainingEffect')) is not None else None,
+                    'Anaerobic_Training': float(val) if (val := activity.get('anaerobicTrainingEffect')) is not None else None,
                 }
             })
             points_list.append({
