@@ -916,8 +916,8 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Vertical_Ratio": parsed_record.get('vertical_ratio', None),
                                     "Step_Length": parsed_record.get('step_length', None),
                                     # Running Dynamics extras
-                                    "GroundContactTimeBalance": parsed_record.get('stance_time_balance', None),  # Left/Right balance percentage
-                                    "StanceTimePercent": parsed_record.get('stance_time_percent', None),  # Stance time as percentage of step
+                                    "Stance_Time_Balance": parsed_record.get('stance_time_balance', None),  # Left/Right balance percentage
+                                    "Stance_Time_Percent": parsed_record.get('stance_time_percent', None),  # Stance time as percentage of step
                                     # Performance/Stamina metrics
                                     "PerformanceCondition": parsed_record.get('performance_condition', None),  # Real-time performance indicator
                                     "Stamina": parsed_record.get('current_stress', None),  # Current stamina/stress level
@@ -959,8 +959,8 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Avg_StrideLength": session_record.get('avg_step_length', None),
                                     "Avg_VerticalOscillation": session_record.get('avg_vertical_oscillation', None),
                                     "Avg_VerticalRatio": session_record.get('avg_vertical_ratio', None),
-                                    "Avg_GroundContactTime": session_record.get('avg_stance_time', None),
-                                    "Avg_GroundContactTimeBalance": session_record.get('avg_stance_time_balance', None),
+                                    "Avg_Stance_Time": session_record.get('avg_stance_time', None),
+                                    "Avg_Stance_Time_Balance": session_record.get('avg_stance_time_balance', None),
                                     # Power metrics
                                     "Total_Power": session_record.get('total_work', None),
                                     "Avg_Power": session_record.get('avg_power', None),
@@ -1041,7 +1041,7 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                             }
                             point["fields"].update({
                                     # Running Dynamics lap extras
-                                    "Avg_GroundContactTimeBalance": lap_record.get('avg_stance_time_balance', None),
+                                    "Avg_Stance_Time_Balance": lap_record.get('avg_stance_time_balance', None),
                                     # Respiration metrics
                                     "Avg_RespirationRate": lap_record.get('avg_respiration_rate', None),
                                     "Max_RespirationRate": lap_record.get('max_respiration_rate', None),
