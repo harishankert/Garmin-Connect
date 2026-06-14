@@ -35,7 +35,7 @@ if env_override:
 # %%
 INFLUXDB_VERSION = os.getenv("INFLUXDB_VERSION",'1') # Your influxdb database version (accepted values are '1' or '3')
 assert INFLUXDB_VERSION in ['1','3'], "Only InfluxDB version 1 or 3 is allowed - please ensure to set this value to either 1 or 3"
-INFLUXDB_HOST = os.getenv("INFLUXDB_HOST",'your.influxdb.hostname') # Required
+INFLUXDB_HOST = os.getenv("INFLUXDB_HOST",'localhost') # Required
 INFLUXDB_PORT = int(os.getenv("INFLUXDB_PORT", 8086)) # Required
 INFLUXDB_USERNAME = os.getenv("INFLUXDB_USERNAME", 'influxdb_username') # Required
 INFLUXDB_PASSWORD = os.getenv("INFLUXDB_PASSWORD", 'influxdb_access_password') # Required
@@ -43,8 +43,9 @@ INFLUXDB_DATABASE = os.getenv("INFLUXDB_DATABASE", 'GarminStats') # Required
 INFLUXDB_V3_ACCESS_TOKEN = os.getenv("INFLUXDB_V3_ACCESS_TOKEN",'') # InfluxDB V3 Access token, required only for InfluxDB V3
 INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", 'default') # required only for InfluxDB V3 
 TOKEN_DIR = os.getenv("TOKEN_DIR", "~/.garminconnect") # optional
-GARMINCONNECT_EMAIL = os.environ.get("GARMINCONNECT_EMAIL", None) # optional, asks in prompt on run if not provided
-GARMINCONNECT_PASSWORD = base64.b64decode(os.getenv("GARMINCONNECT_BASE64_PASSWORD")).decode("utf-8") if os.getenv("GARMINCONNECT_BASE64_PASSWORD") != None else None # optional, asks in prompt on run if not provided
+GARMINCONNECT_EMAIL = (os.environ.get("GARMINCONNECT_EMAIL") or "").strip() or None # optional, asks in prompt on run if not provided
+_garmin_pw_b64 = os.getenv("GARMINCONNECT_BASE64_PASSWORD")
+GARMINCONNECT_PASSWORD = base64.b64decode(_garmin_pw_b64).decode("utf-8").strip() if _garmin_pw_b64 else None # optional, asks in prompt on run if not provided
 GARMINCONNECT_IS_CN = True if os.getenv("GARMINCONNECT_IS_CN") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional if you are using a Chinese account
 GARMIN_DEVICENAME = os.getenv("GARMIN_DEVICENAME", "Unknown")  # optional, attempts to set the name automatically if not given
 GARMIN_DEVICEID = os.getenv("GARMIN_DEVICEID", None)  # optional, attempts to set the id automatically if not given
@@ -58,7 +59,7 @@ MAX_CONSECUTIVE_500_ERRORS = int(os.getenv("MAX_CONSECUTIVE_500_ERRORS", 10)) # 
 INFLUXDB_ENDPOINT_IS_HTTP = False if os.getenv("INFLUXDB_ENDPOINT_IS_HTTP") in ['False','false','FALSE','f','F','no','No','NO','0'] else True # optional
 GARMIN_DEVICENAME_AUTOMATIC = False if GARMIN_DEVICENAME != "Unknown" else True # optional
 UPDATE_INTERVAL_SECONDS = int(os.getenv("UPDATE_INTERVAL_SECONDS", 300)) # optional
-FETCH_SELECTION = os.getenv("FETCH_SELECTION", "daily_avg,sleep,steps,heartrate,stress,breathing,hrv,fitness_age,vo2,activity,race_prediction,body_composition,lifestyle") # additional available values are lactate_threshold,training_status,training_readiness,hill_score,endurance_score,blood_pressure,hydration,solar_intensity which you can add to the list seperated by , without any space
+FETCH_SELECTION = os.getenv("FETCH_SELECTION", "daily_avg,sleep,steps,heartrate,stress,breathing,hrv,fitness_age,vo2,activity,race_prediction,body_composition,lifestyle") # additional available values are lactate_threshold,training_status,training_readiness,hill_score,endurance_score,blood_pressure,hydration,solar_intensity,cycling_dynamics which you can add to the list seperated by , without any space
 ACTIVITY_TYPE_FILTER = [t.strip().lower() for t in os.getenv("ACTIVITY_TYPE_FILTER", "").split(",") if t.strip()] # optional, comma-separated list of activity typeKeys to import only specific activity types. Leave empty to import all. Known typeKeys: running,treadmill_running,indoor_running,cycling,indoor_cycling,road_biking,mountain_biking,walking,hiking,mountaineering,strength_training,hiit,indoor_cardio,elliptical,lap_swimming,open_water_swimming,rock_climbing,indoor_climbing,tennis_v2,kayaking_v2,boating_v2,multi_sport,other
 LACTATE_THRESHOLD_SPORTS = os.getenv("LACTATE_THRESHOLD_SPORTS", "RUNNING").upper().split(",") # Garmin currently implements RUNNING, but has provisions for CYCLING, and SWIMMING
 KEEP_FIT_FILES = True if os.getenv("KEEP_FIT_FILES") in ['True', 'true', 'TRUE','t', 'T', 'yes', 'Yes', 'YES', '1'] else False # optional
@@ -136,8 +137,8 @@ def iter_days(start_date: str, end_date: str):
 
 # %%
 def garmin_login():
-    token_store = TOKEN_DIR
     token_store_expanded = os.path.expanduser(TOKEN_DIR)
+    token_store = token_store_expanded
     if os.path.isfile(token_store_expanded) and (not token_store_expanded.endswith('.json')):
         # New native client treats non-.json token paths as directories.
         # If a legacy file exists at this path, use a dedicated directory instead.
@@ -151,31 +152,19 @@ def garmin_login():
     try:
         logging.info(f"Trying to login to Garmin Connect using token data from '{token_store}'...")
         garmin = Garmin()
-        result1, result2 = garmin.login(token_store)
-        if result1 == "needs_mfa":
-            raise GarminConnectAuthenticationError(
-                "MFA is required but credentials are not configured for interactive login"
-            )
+        garmin.login(token_store)
         logging.info("Login to Garmin Connect successful using stored session tokens.")
 
     except (FileNotFoundError, GarminConnectAuthenticationError, GarminConnectConnectionError):
         logging.warning("Session is expired or login information not present/incorrect. You'll need to log in again...login with your Garmin Connect credentials to generate them.")
         try:
-            user_email = GARMINCONNECT_EMAIL or input("Enter Garminconnect Login e-mail: ")
-            user_password = GARMINCONNECT_PASSWORD or input("Enter Garminconnect password (characters will be visible): ")
+            user_email = (GARMINCONNECT_EMAIL or "").strip() or input("Enter Garminconnect Login e-mail: ").strip()
+            user_password = (GARMINCONNECT_PASSWORD or "").strip() or input("Enter Garminconnect password (characters will be visible): ").strip()
             garmin = Garmin(
-                email=user_email, password=user_password, is_cn=GARMINCONNECT_IS_CN, return_on_mfa=True
+                email=user_email, password=user_password, is_cn=GARMINCONNECT_IS_CN,
+                prompt_mfa=lambda: input("MFA one-time code (via email or SMS): ").strip(),
             )
-            result1, result2 = garmin.login(token_store)
-            if result1 == "needs_mfa":  # MFA is required
-                mfa_code = input("MFA one-time code (via email or SMS): ")
-                garmin.resume_login(result2, mfa_code)
-
-            # Persist tokens explicitly so next run can restore from TOKEN_DIR.
-            if hasattr(garmin, "client") and hasattr(garmin.client, "dump"):
-                garmin.client.dump(token_store)
-            else:
-                raise GarminConnectConnectionError("Unable to persist Garmin session tokens: no supported dump method found")
+            garmin.login(token_store)
 
             logging.info(f"Oauth tokens stored in '{token_store}' for future use")
             logging.info("Login to Garmin Connect successful using credentials and MFA (if enabled). Continuing with current run")
@@ -208,7 +197,7 @@ def write_points_to_influxdb(points):
         if len(points) != 0:
             if TAG_MEASUREMENTS_WITH_USER_EMAIL:
                 for item in points:
-                    item['tags'].update({'User_ID': garmin_obj.client.profile.get('userName','Unknown')})
+                    item['tags'].update({'User_ID': garmin_obj.display_name or 'Unknown'})
             # Write in chunks - Issue reported for large activities data containing >20000 points - Error 413 : payload too large
             for i in range(0, len(points), write_chunk_size):
                 if INFLUXDB_VERSION == '1':
@@ -761,6 +750,42 @@ def get_activity_summary(date_str):
     return points_list, activity_with_gps_id_dict, strength_activity_id_dict
 
 # %%
+def purge_existing_strength_exercise_sets(activity_id):
+    """Delete stale strength rows before rewriting the current Garmin snapshot.
+
+    Edited Garmin exercises can change exercise tags. Without removing the
+    previous series first, InfluxDB keeps the stale and corrected rows in
+    parallel because the tags no longer match.
+    """
+    if INFLUXDB_VERSION != '1':
+        logging.warning(
+            f"InfluxDB version {INFLUXDB_VERSION} does not support purging StrengthExerciseSet series for activity {activity_id}. "
+            "Applying the default refresh behavior; edited exercises may produce duplicated rows."
+        )
+        return True
+
+    if not hasattr(influxdbclient, 'delete_series'):
+        logging.warning(
+            f"InfluxDB client does not support purging StrengthExerciseSet series for activity {activity_id}. "
+            "Applying the default refresh behavior; edited exercises may produce duplicated rows."
+        )
+        return True
+
+    try:
+        influxdbclient.delete_series(
+            measurement='StrengthExerciseSet',
+            tags={'ActivityID': str(activity_id)},
+        )
+        logging.info(f"Purged existing StrengthExerciseSet series for activity {activity_id}")
+        return True
+    except (InfluxDBClientError, InfluxDBError) as err:
+        logging.warning(
+            f"Failed to purge existing StrengthExerciseSet series for activity {activity_id}: {err}"
+        )
+        return False
+
+
+# %%
 def get_strength_training_data(strength_activity_id_dict):
     """Fetch strength training exercise sets and HR zones from Garmin Connect API.
     Uses API data (not FIT files) to get corrected exercise names and details.
@@ -774,9 +799,11 @@ def get_strength_training_data(strength_activity_id_dict):
         activity_selector = activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
         activity_name = activity_info.get('activityName', activity_type)
 
+        exercise_set_points = None
         try:
             exercise_sets_data = garmin_obj.get_activity_exercise_sets(activity_id)
             exercises = exercise_sets_data.get('exerciseSets', []) or []
+            exercise_set_points = []
             set_counter = 0
             for exercise in exercises:
                 set_type = exercise.get('setType', '')
@@ -805,7 +832,7 @@ def get_strength_training_data(strength_activity_id_dict):
                     "Weight_kg": weight_kg,
                     "Duration_s": duration_s,
                 }
-                points_list.append({
+                exercise_set_points.append({
                     "measurement": "StrengthExerciseSet",
                     "time": set_time,
                     "tags": {
@@ -821,6 +848,14 @@ def get_strength_training_data(strength_activity_id_dict):
             logging.info(f"Success : Fetching {set_counter} strength exercise sets for activity {activity_id}")
         except Exception as err:
             logging.warning(f"Failed to fetch exercise sets for activity {activity_id}: {err}")
+
+        if exercise_set_points is not None:
+            if purge_existing_strength_exercise_sets(activity_id):
+                points_list.extend(exercise_set_points)
+            else:
+                logging.warning(
+                    f"Skipped : StrengthExerciseSet refresh for activity {activity_id} because stale rows could not be purged"
+                )
 
         try:
             hr_zones_data = garmin_obj.get_activity_hr_in_timezones(activity_id)
@@ -851,6 +886,144 @@ def get_strength_training_data(strength_activity_id_dict):
             logging.warning(f"Failed to fetch HR zones for activity {activity_id}: {err}")
 
     return points_list
+
+# %%
+def _build_cycling_dynamics_point(all_records_list, all_sessions_list, activityID, activity_type, activity_start_time):
+    def avg_nonzero(records, key):
+        vals = [r[key] for r in records if r.get(key) not in (None, 0)]
+        return sum(vals) / len(vals) if vals else None
+
+    def session_phase_component(session, key, index):
+        """Extract one angle from a power phase tuple field; skip None/0 entries."""
+        v = session.get(key)
+        if v is None:
+            return None
+        try:
+            item = v[index] if hasattr(v, '__getitem__') else v
+            return float(item) if item not in (None, 0) else None
+        except (IndexError, TypeError):
+            return None
+
+    def record_phase_avg(records, key, index):
+        """Average one component of a per-record power phase tuple field."""
+        vals = []
+        for r in records:
+            v = r.get(key)
+            if v is None:
+                continue
+            try:
+                item = v[index] if hasattr(v, '__getitem__') else v
+                if item not in (None, 0):
+                    vals.append(item)
+            except (IndexError, TypeError):
+                pass
+        return sum(vals) / len(vals) if vals else None
+
+    fields = {}
+
+    # --- Session-level pre-computed averages (primary source) ---
+    if all_sessions_list:
+        session = all_sessions_list[0]
+
+        # Scalar fields — ANT+ standard
+        for src, dst in [
+            ('avg_left_torque_effectiveness',  'avg_left_torque_effectiveness'),
+            ('avg_right_torque_effectiveness', 'avg_right_torque_effectiveness'),
+            ('avg_left_pedal_smoothness',      'avg_left_pedal_smoothness'),
+            ('avg_right_pedal_smoothness',     'avg_right_pedal_smoothness'),
+            ('avg_left_pco',                   'avg_left_pco'),
+            ('avg_right_pco',                  'avg_right_pco'),
+        ]:
+            v = session.get(src)
+            if v is not None:
+                fields[dst] = float(v)
+
+        # Power phase tuples — Garmin Vector/Rally exclusive
+        # fitparse returns avg_left_power_phase as (start, end, ...) in degrees
+        for field_key, idx, dst in [
+            ('avg_left_power_phase',       0, 'avg_left_power_phase_start'),
+            ('avg_left_power_phase',       1, 'avg_left_power_phase_end'),
+            ('avg_right_power_phase',      0, 'avg_right_power_phase_start'),
+            ('avg_right_power_phase',      1, 'avg_right_power_phase_end'),
+            ('avg_left_power_phase_peak',  0, 'avg_left_power_phase_peak_start'),
+            ('avg_left_power_phase_peak',  1, 'avg_left_power_phase_peak_end'),
+            ('avg_right_power_phase_peak', 0, 'avg_right_power_phase_peak_start'),
+            ('avg_right_power_phase_peak', 1, 'avg_right_power_phase_peak_end'),
+        ]:
+            v = session_phase_component(session, field_key, idx)
+            if v is not None:
+                fields[dst] = v
+
+        # Power summary fields
+        for src, dst in [
+            ('normalized_power',      'normalized_power'),
+            ('training_stress_score', 'training_stress_score'),
+            ('intensity_factor',      'intensity_factor'),
+        ]:
+            v = session.get(src)
+            if v is not None:
+                fields[dst] = float(v)
+
+        # left_right_balance: FIT uint16 bitmask — bit15 set means right% is known,
+        # lower 15 bits / 100 = right power percentage; we store left% for readability.
+        lrb = session.get('left_right_balance')
+        if lrb is not None:
+            try:
+                raw = int(lrb)
+                if raw & 0x8000:
+                    fields['left_right_balance'] = round(100.0 - (raw & 0x7FFF) / 100.0, 2)
+                elif raw > 0:
+                    fields['left_right_balance'] = float(raw)
+            except (ValueError, TypeError):
+                pass
+
+    # --- Per-record fallback (for devices that store dynamics in record messages) ---
+    for src, dst in [
+        ('left_torque_effectiveness',  'avg_left_torque_effectiveness'),
+        ('right_torque_effectiveness', 'avg_right_torque_effectiveness'),
+        ('left_pedal_smoothness',      'avg_left_pedal_smoothness'),
+        ('right_pedal_smoothness',     'avg_right_pedal_smoothness'),
+        ('left_pco',                   'avg_left_pco'),
+        ('right_pco',                  'avg_right_pco'),
+    ]:
+        if dst not in fields:
+            v = avg_nonzero(all_records_list, src)
+            if v is not None:
+                fields[dst] = v
+
+    for field_key, idx, dst in [
+        ('left_power_phase',       0, 'avg_left_power_phase_start'),
+        ('left_power_phase',       1, 'avg_left_power_phase_end'),
+        ('right_power_phase',      0, 'avg_right_power_phase_start'),
+        ('right_power_phase',      1, 'avg_right_power_phase_end'),
+        ('left_power_phase_peak',  0, 'avg_left_power_phase_peak_start'),
+        ('left_power_phase_peak',  1, 'avg_left_power_phase_peak_end'),
+        ('right_power_phase_peak', 0, 'avg_right_power_phase_peak_start'),
+        ('right_power_phase_peak', 1, 'avg_right_power_phase_peak_end'),
+    ]:
+        if dst not in fields:
+            v = record_phase_avg(all_records_list, field_key, idx)
+            if v is not None:
+                fields[dst] = v
+
+    # Guard: write nothing if no cycling dynamics data was found
+    if not fields:
+        return None
+
+    fields['ActivityName'] = activity_type
+    fields['Activity_ID'] = activityID
+
+    return {
+        "measurement": "CyclingDynamics",
+        "time": activity_start_time.isoformat(),
+        "tags": {
+            "Device": GARMIN_DEVICENAME,
+            "Database_Name": INFLUXDB_DATABASE,
+            "ActivityID": activityID,
+            "ActivitySelector": activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
+        },
+        "fields": fields
+    }
 
 # %%
 def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back to TCX
@@ -939,7 +1112,7 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "ActivitySelector": activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type
                                 },
                                 "fields": {
-                                    "Index": int(session_record.get('message_index', -1)) + 1,
+                                    "Index": (int(v) if str(v := session_record.get('message_index', -1)).isdigit() else -1) + 1,
                                     "ActivityName": activity_type,
                                     "Activity_ID": activityID,
                                     "Sport": str(session_record.get('sport', None)), # Avoid partial write error 400 see #152#issuecomment-3084539416
@@ -1047,6 +1220,16 @@ def fetch_activity_GPS(activityIDdict): # Uses FIT file by default, falls back t
                                     "Max_RespirationRate": lap_record.get('max_respiration_rate', None),
                                 })
                             points_list.append(point)
+                    # Extract cycling dynamics and advanced power metrics
+                    if 'cycling_dynamics' in FETCH_SELECTION:
+                        cycling_point = _build_cycling_dynamics_point(
+                            all_records_list, all_sessions_list,
+                            activityID, activity_type, activity_start_time
+                        )
+                        if cycling_point:
+                            points_list.append(cycling_point)
+                            logging.info(f"Activity ID {activityID}: CyclingDynamics point added ({len(cycling_point['fields']) - 2} metrics)")
+
                     if KEEP_FIT_FILES:
                         os.makedirs(FIT_FILE_STORAGE_LOCATION, exist_ok=True)
                         fit_path = os.path.join(FIT_FILE_STORAGE_LOCATION, activity_start_time.strftime('%Y%m%dT%H%M%SUTC-') + activity_type + ".fit")
